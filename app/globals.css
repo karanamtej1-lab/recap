@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+body { background: #0b0c10; color: #e8e9ee; }
+
+.glass { background: rgba(24, 27, 34, 0.72); border: 1px solid rgba(255, 255, 255, 0.07); backdrop-filter: blur(14px); }
+.glow { box-shadow: 0 0 0 1px rgba(124, 108, 255, 0.35), 0 10px 40px -10px rgba(124, 108, 255, 0.45); }
+.scroll-thin::-webkit-scrollbar { width: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #323846; border-radius: 8px; }
+
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(169, 159, 255, 0.25), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
