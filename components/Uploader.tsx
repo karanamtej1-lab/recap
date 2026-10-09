@@ -7,6 +7,8 @@ export type Source =
   | { kind: "file"; file: File; model: string }
   | { kind: "text"; text: string };
 
+const SAMPLE_FALLBACK = "https://raw.githubusercontent.com/karanamtej1-lab/recap/main/public/sample/lecture.mp4";
+
 const MODELS = [
   { id: "Xenova/whisper-tiny.en", label: "Fast", hint: "~40 MB, quickest" },
   { id: "Xenova/whisper-base.en", label: "Accurate", hint: "~80 MB, better words" },
@@ -49,7 +51,10 @@ export function Uploader({ onStart, error, provider }: { onStart: (s: Source) =>
   const sample = async () => {
     setLoadingSample(true);
     try {
-      const blob = await (await fetch("/sample/lecture.mp4")).blob();
+      // Bundled locally; the hosted build fetches it from the GitHub repo instead.
+      let res = await fetch("/sample/lecture.mp4");
+      if (!res.ok) res = await fetch(SAMPLE_FALLBACK);
+      const blob = await res.blob();
       useFile(new File([blob], "Sample lecture — How memory works.mp4", { type: "video/mp4" }));
     } finally {
       setLoadingSample(false);
