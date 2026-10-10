@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { FileText, Mic, PlayCircle, Square, Upload, Lock, Sparkles, Scissors, GraduationCap } from "lucide-react";
+import { FileText, Mic, PlayCircle, Square, Upload, Lock, Sparkles, Scissors, GraduationCap, Layers } from "lucide-react";
 
 export type Source =
   | { kind: "file"; file: File; model: string }
@@ -14,7 +14,7 @@ const MODELS = [
   { id: "Xenova/whisper-base.en", label: "Accurate", hint: "~80 MB, better words" },
 ];
 
-export function Uploader({ onStart, error, provider }: { onStart: (s: Source) => void; error: string; provider: string }) {
+export function Uploader({ onStart, error, aiOn, onOpenSettings }: { onStart: (s: Source) => void; error: string; aiOn: boolean; onOpenSettings: () => void }) {
   const [model, setModel] = useState(MODELS[0].id);
   const [dragging, setDragging] = useState(false);
   const [recording, setRecording] = useState<MediaRecorder | null>(null);
@@ -52,7 +52,7 @@ export function Uploader({ onStart, error, provider }: { onStart: (s: Source) =>
     setLoadingSample(true);
     try {
       // Bundled locally; the hosted build fetches it from the GitHub repo instead.
-      let res = await fetch("/sample/lecture.mp4");
+      let res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/sample/lecture.mp4`);
       if (!res.ok) res = await fetch(SAMPLE_FALLBACK);
       const blob = await res.blob();
       useFile(new File([blob], "Sample lecture — How memory works.mp4", { type: "video/mp4" }));
@@ -142,6 +142,15 @@ export function Uploader({ onStart, error, provider }: { onStart: (s: Source) =>
             </div>
           </>
         )}
+        {!pasting && (
+          <p className="mt-3 text-center text-xs text-white/40">
+            <Sparkles className="mr-1 inline h-3.5 w-3.5 text-accent-soft" />
+            {aiOn ? "AI notes are on." : "Works offline with no key."}{" "}
+            <button onClick={onOpenSettings} className="text-accent-soft underline-offset-2 hover:underline">
+              {aiOn ? "Change AI engine" : "Add a Claude or Gemini key for AI notes"}
+            </button>
+          </p>
+        )}
         {error && <p className="mt-4 rounded-lg bg-hot/10 px-4 py-2 text-sm text-hot">{error}</p>}
       </div>
 
@@ -149,7 +158,7 @@ export function Uploader({ onStart, error, provider }: { onStart: (s: Source) =>
         {[
           { icon: GraduationCap, title: "Notes & quiz", body: "Structured study notes, key terms, and a quiz that links each answer back to the moment it was taught." },
           { icon: Scissors, title: "Scored clips", body: "The best 15–60s moments, cut vertical with word-by-word captions. Every score shows its work." },
-          { icon: Sparkles, title: "Ask anything", body: provider === "offline" ? "Search the recording by keyword. Add an AI key for full answers." : "Ask the recording a question; get an answer with clickable timestamps." },
+          { icon: Layers, title: "Flashcards", body: "Terms and quiz questions become a spaced-repetition deck that tells you when to review. Exports to Anki." },
         ].map(({ icon: Icon, title, body }) => (
           <div key={title} className="glass rounded-xl p-4">
             <Icon className="h-5 w-5 text-accent-soft" />

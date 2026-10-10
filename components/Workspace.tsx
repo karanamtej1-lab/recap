@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Download, GraduationCap, MessageCircle, Scissors, AlertTriangle } from "lucide-react";
+import { BookOpen, Download, GraduationCap, Layers, MessageCircle, Scissors, AlertTriangle } from "lucide-react";
 import type { Media } from "@/app/page";
 import { formatTime } from "@/lib/format";
 import type { Recap, Segment, Word } from "@/lib/types";
@@ -9,11 +9,15 @@ import { Markdown } from "./Markdown";
 import { ClipStudio } from "./ClipStudio";
 import { Quiz } from "./Quiz";
 import { Ask } from "./Ask";
+import { Flashcards } from "./Flashcards";
+import { deckStats, type Card } from "@/lib/cards";
+import type { AIConfig } from "@/lib/llm";
 
-type Tab = "notes" | "clips" | "quiz" | "ask";
+type Tab = "notes" | "clips" | "quiz" | "cards" | "ask";
 
-export function Workspace({ media, words, segments, recap, note }: {
+export function Workspace({ media, words, segments, recap, note, config, cards, onCardsChange }: {
   media: Media; words: Word[]; segments: Segment[]; recap: Recap; note: string;
+  config: AIConfig; cards: Card[]; onCardsChange: (c: Card[]) => void;
 }) {
   const [tab, setTab] = useState<Tab>("notes");
   const [now, setNow] = useState(0);
@@ -44,6 +48,7 @@ export function Workspace({ media, words, segments, recap, note }: {
     { id: "notes", label: "Notes", icon: BookOpen },
     { id: "clips", label: "Clips", icon: Scissors, count: recap.highlights.length },
     { id: "quiz", label: "Quiz", icon: GraduationCap, count: recap.quiz.length },
+    { id: "cards", label: "Cards", icon: Layers, count: deckStats(cards).due },
     { id: "ask", label: "Ask", icon: MessageCircle },
   ];
 
@@ -61,7 +66,7 @@ export function Workspace({ media, words, segments, recap, note }: {
 
       {note && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-          <AlertTriangle className="h-4 w-4 shrink-0" /> {note} — showing the offline analysis instead.
+          <AlertTriangle className="h-4 w-4 shrink-0" /> {note}
         </div>
       )}
 
@@ -130,7 +135,8 @@ export function Workspace({ media, words, segments, recap, note }: {
           {tab === "notes" && <Notes recap={recap} seek={seek} />}
           {tab === "clips" && <ClipStudio media={media} words={words} highlights={recap.highlights} seek={seek} />}
           {tab === "quiz" && <Quiz quiz={recap.quiz} seek={seek} />}
-          {tab === "ask" && <Ask segments={segments} seek={seek} />}
+          {tab === "cards" && <Flashcards cards={cards} onChange={onCardsChange} seek={seek} title={recap.title} />}
+          {tab === "ask" && <Ask segments={segments} seek={seek} config={config} />}
         </div>
       </div>
     </div>

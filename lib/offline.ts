@@ -2,6 +2,7 @@
 // Plain text statistics - keyword frequency, cue phrases, sentence shape. Every
 // number it outputs can be explained in one sentence, which is the point.
 import { clamp, formatTime, scoreFrom } from "./format";
+import { cosine, textRank, tfidf, topicBreaks, type Vec } from "./textrank";
 import type { AskAnswer, Chapter, Highlight, QuizQuestion, Recap, ScoreBreakdown, Segment } from "./types";
 
 const STOP = new Set(
@@ -20,6 +21,7 @@ remember three four five six seven eight nine ten hundred thousand able exactly 
 
 const HOOK_CUES = /^(so here'?s|here'?s|imagine|the (secret|key|trick|problem|reason)|what if|why|how|did you know|most people|the biggest|never|stop|if you)/i;
 const ENERGY_CUES = /\b(really|never|always|most|important|huge|incredible|amazing|crucial|surprising|wrong|secret|best|worst|biggest)\b/gi;
+const TRANSITION = /^(so,? (here|now|let'?s|what|the next)|now,? |okay,? |ok,? |alright,? |let'?s |next,? |moving on|another |the (next|second|third|last) |first,? |finally,? )/i;
 const DANGLING_START = /^(and|but|so|it|this|that|they|he|she|which|because|also|then)\b/i;
 const ACTION_CUES = /\b(need to|make sure|remember to|don'?t forget|homework|is due|are due|due (on|by|at)|deadline|for next (time|week|class)|action item|follow up|by (monday|tuesday|wednesday|thursday|friday|tomorrow))\b/i;
 
@@ -133,20 +135,74 @@ export function findHighlights(segments: Segment[], counts: Map<string, number>,
   return picked.sort((a, b) => b.score - a.score);
 }
 
-function chaptersFor(segments: Segment[]): Chapter[] {
+// Chapters from topic shifts (TextTiling), titled by the phrase most distinctive to each
+// chapter compared to the whole talk. Falls back to even splits for very short talks.
+function chaptersFor(segments: Segment[], vecs: Vec[], phrases: string[]): Chapter[] {
   if (!segments.length) return [];
   const duration = segments[segments.length - 1].end;
-  const n = clamp(Math.round(duration / 120), 2, 8);
-  const size = Math.ceil(segments.length / n);
-  const chapters: Chapter[] = [];
-  const used = new Set<string>();
-  for (let i = 0; i < segments.length; i += size) {
-    const part = segments.slice(i, i + size);
-    const word = topKeywords(keywordCounts(part), 6).find((w) => !used.has(w)) ?? "continued";
-    used.add(word);
-    chapters.push({ start: part[0].start, title: cap(word) });
+  // A chapter should be at least ~1/10 of the talk: 20 s for a short clip, 90 s for a long lecture.
+  let breaks = topicBreaks(vecs, segments.map((s) => s.start), { block: 4, minGapSec: clamp(duration / 10, 20, 90), maxChapters: 8 });
+  // TextTiling finds roughly where the vocabulary changes; speakers announce the exact spot
+  // ("So here's…", "Now, …", "Let's…"). Snap each break to a nearby sentence that opens with a cue.
+  breaks = [...new Set(breaks.map((b) => {
+    if (b === 0) return 0;
+    for (const d of [0, -1, 1, -2, 2, -3, 3]) {
+      const j = b + d;
+      if (j > 0 && j < segments.length && TRANSITION.test(segments[j].text.trim())) return j;
+    }
+    return b;
+  }))].sort((a, b) => a - b);
+  if (breaks.length === 1) {
+    const n = clamp(Math.round(duration / 120), 1, 6);
+    const size = Math.ceil(segments.length / n);
+    breaks = Array.from({ length: n }, (_, k) => k * size).filter((i) => i < segments.length);
   }
-  return chapters;
+  const parts = breaks.map((b, k) => segments.slice(b, breaks[k + 1] ?? segments.length));
+  const texts = parts.map((p) => p.map((s) => s.text.toLowerCase()).join(" "));
+
+  // Give each repeated phrase to the chapter that says it most often (by density), one
+  // phrase per chapter: an intro that lists every topic once loses to the chapter that explains it.
+  const titles: (string | undefined)[] = parts.map(() => undefined);
+  const pairs = phrases.flatMap((p) => texts.map((t, k) => ({ p, k, n: t.split(p).length - 1, d: (t.split(p).length - 1) / Math.max(1, t.length) })))
+    .filter((x) => x.n > 0)
+    .sort((a, b) => b.n - a.n || b.d - a.d);
+  const usedPhrases = new Set<string>();
+  for (const { p, k } of pairs) {
+    if (titles[k] || usedPhrases.has(p)) continue;
+    titles[k] = p;
+    usedPhrases.add(p);
+  }
+
+  // Fallback: the two words most distinctive to this chapter (said at least twice here).
+  const docCounts = keywordCounts(segments);
+  const docTotal = [...docCounts.values()].reduce((a, b) => a + b, 0) || 1;
+  const used = new Set<string>([...usedPhrases].flatMap((p) => p.split(" ")));
+  return parts.map((part, k) => {
+    let title = titles[k];
+    if (!title) {
+      const counts = keywordCounts(part);
+      const total = [...counts.values()].reduce((a, c) => a + c, 0) || 1;
+      const best = [...counts.entries()]
+        .filter(([w, c]) => c >= 2 && !used.has(w))
+        .map(([w, c]) => ({ w, s: (c / total) / ((docCounts.get(w) ?? c) / docTotal) * Math.log(1 + c) }))
+        .sort((a, b) => b.s - a.s)
+        .slice(0, 2)
+        .map((x) => x.w);
+      best.forEach((w) => used.add(w));
+      title = best.length ? best.join(" & ") : shorten(part[0].text, 32);
+    }
+    return { start: part[0].start, title: title.split(" ").map((w) => (w === "&" ? w : cap(w))).join(" ") };
+  });
+}
+
+// TextRank picks, with redundancy control: skip a sentence too similar to one already chosen.
+function pickRanked(cands: { s: Segment; v: Vec; r: number }[], k: number, maxSim = 0.45) {
+  const chosen: typeof cands = [];
+  for (const c of [...cands].sort((a, b) => b.r - a.r)) {
+    if (chosen.every((x) => cosine(x.v, c.v) < maxSim)) chosen.push(c);
+    if (chosen.length === k) break;
+  }
+  return chosen;
 }
 
 function quizFor(segments: Segment[], keywords: string[]): QuizQuestion[] {
@@ -197,25 +253,31 @@ export function offlineRecap(segments: Segment[]): Recap {
   const phrases = topPhrases(segments, 6);
   const vocab = [...phrases, ...keywords.filter((k) => !phrases.some((p) => p.includes(k)))];
 
-  const ranked = segments
-    .filter((s) => words(s.text).length >= 6)
-    .map((s) => ({ s, d: density(s.text, counts, maxCount) }))
-    .sort((a, b) => b.d - a.d);
-  const keyPoints = ranked.slice(0, 6).map(({ s }) => s).sort((a, b) => a.start - b.start)
-    .map((s) => ({ text: sentenceCase(s.text), at: s.start }));
+  const vecs = tfidf(segments.map((s) => words(s.text).filter((w) => !STOP.has(w))));
+  const rank = textRank(vecs);
+  // Candidates: full sentences of a readable length that don't start mid-thought.
+  const cands = segments
+    .map((s, i) => ({ s, v: vecs[i], r: rank[i] }))
+    // No questions (rhetorical setups, not facts) and no fragments that start lowercase
+    // (Whisper split them off the previous sentence).
+    .filter(({ s }) => { const n = words(s.text).length; const t = s.text.trim(); return n >= 6 && n <= 45 && !t.endsWith("?") && !/^[a-z]/.test(t); })
+    .map((c) => (DANGLING_START.test(c.s.text.trim()) ? { ...c, r: c.r * 0.6 } : c));
+  const keyPoints = pickRanked(cands, 6).sort((a, b) => a.s.start - b.s.start)
+    .map(({ s }) => ({ text: sentenceCase(s.text), at: s.start }));
+  const tldrPicks = pickRanked(cands.filter(({ s }) => words(s.text).length <= 30), 2, 0.3).sort((a, b) => a.s.start - b.s.start);
 
-  const chapters = chaptersFor(segments);
+  const chapters = chaptersFor(segments, vecs, phrases);
   const notes = chapters.map((c, i) => {
     const end = chapters[i + 1]?.start ?? Infinity;
-    const inChapter = ranked.filter(({ s }) => s.start >= c.start && s.start < end).slice(0, 3)
-      .map(({ s }) => s).sort((a, b) => a.start - b.start);
-    return `## ${c.title} (${formatTime(c.start)})\n${inChapter.map((s) => `- ${sentenceCase(s.text)}`).join("\n")}`;
+    const inChapter = pickRanked(cands.filter(({ s }) => s.start >= c.start && s.start < end), 3)
+      .sort((a, b) => a.s.start - b.s.start);
+    return `## ${c.title} (${formatTime(c.start)})\n${inChapter.map(({ s }) => `- ${sentenceCase(s.text)}`).join("\n")}`;
   }).join("\n\n");
 
   return {
     title: phrases.length ? phrases[0].split(" ").map(cap).join(" ") + (keywords[0] && !phrases[0].includes(keywords[0]) ? ` & ${cap(keywords[0])}` : "")
       : keywords.length >= 2 ? `${cap(keywords[0])} & ${cap(keywords[1])}` : "Untitled recording",
-    tldr: keyPoints.slice(0, 2).map((k) => k.text).join(" ") || "Not enough speech to summarize.",
+    tldr: tldrPicks.map(({ s }) => sentenceCase(s.text)).join(" ") || "Not enough speech to summarize.",
     keyPoints,
     notes,
     chapters,

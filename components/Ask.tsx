@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { formatTime } from "@/lib/format";
+import { ask as askRecording } from "@/lib/analyze";
+import type { AIConfig } from "@/lib/llm";
 import type { AskAnswer, Segment } from "@/lib/types";
 import { Markdown } from "./Markdown";
 
@@ -10,7 +12,7 @@ type Turn = { q: string; a?: AskAnswer & { note?: string }; error?: string };
 
 const SUGGESTIONS = ["What's the main argument?", "What will be on the test?", "Explain the hardest part simply", "Were any deadlines mentioned?"];
 
-export function Ask({ segments, seek }: { segments: Segment[]; seek: (t: number) => void }) {
+export function Ask({ segments, seek, config }: { segments: Segment[]; seek: (t: number) => void; config: AIConfig }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,11 +24,10 @@ export function Ask({ segments, seek }: { segments: Segment[]; seek: (t: number)
     setBusy(true);
     setTurns((t) => [...t, { q: question }]);
     try {
-      const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, segments }) });
-      const data = await res.json();
-      setTurns((t) => t.map((x, i) => (i === t.length - 1 ? (res.ok ? { ...x, a: data } : { ...x, error: data.error }) : x)));
-    } catch {
-      setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, error: "Network error" } : x)));
+      const a = await askRecording(question, segments, config);
+      setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, a } : x)));
+    } catch (e) {
+      setTurns((t) => t.map((x, i) => (i === t.length - 1 ? { ...x, error: e instanceof Error ? e.message : "Something went wrong" } : x)));
     } finally {
       setBusy(false);
       input.current?.focus();
@@ -52,6 +53,7 @@ export function Ask({ segments, seek }: { segments: Segment[]; seek: (t: number)
             <div className="max-w-[92%] rounded-2xl rounded-bl-sm bg-white/5 px-4 py-3">
               {t.a ? (
                 <>
+                  {t.a.note && <p className="mb-2 text-xs text-amber-200/80">{t.a.note}. Showing keyword matches instead.</p>}
                   <Markdown text={t.a.answer} />
                   {t.a.citations.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1.5">

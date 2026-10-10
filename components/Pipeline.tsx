@@ -14,8 +14,8 @@ const STEPS: { phase: Phase; label: string; detail: string }[] = [
   { phase: "analyzing", label: "Writing your recap", detail: "Notes, chapters, quiz, and clip scoring" },
 ];
 
-export function Pipeline({ phase, progress, device, words, mediaName }: {
-  phase: Phase; progress: number; device: string; words: Word[]; mediaName?: string;
+export function Pipeline({ phase, progress, device, words, mediaName, detail }: {
+  phase: Phase; progress: number; device: string; words: Word[]; mediaName?: string; detail?: string;
 }) {
   const current = STEPS.findIndex((s) => s.phase === phase);
   const tail = useRef<HTMLDivElement>(null);
@@ -41,6 +41,7 @@ export function Pipeline({ phase, progress, device, words, mediaName }: {
                   <p className="text-xs text-white/45">
                     {s.detail}
                     {s.phase === "transcribing" && device && ` · ${device === "webgpu" ? "GPU" : "CPU"}`}
+                    {s.phase === "analyzing" && active && detail && <span className="block text-accent-soft">{detail}</span>}
                   </p>
                   {showBar && (
                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
