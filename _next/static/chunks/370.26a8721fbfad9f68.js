@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[370],{2370:function(n,e,t){t.d(e,{fs:function(){return r},path:function(){return s}});var i=t(2284);function o(n){return new Proxy({},{get(e,t){if("symbol"!=typeof t)throw new i.jd(`\`${n}.${t}\` is not available in this environment; it needs a Node.js-compatible runtime`)}})}let r=o("fs"),s=o("path")}}]);
